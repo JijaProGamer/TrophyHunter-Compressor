@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrophyHunter Block Mapper</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <h1>TrophyHunter Block Mapper</h1>
+
+    <h2>Upload Images</h2>
+    <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="files" multiple accept="image/*"><br><br>
+        <button type="submit">Upload</button>
+    </form>
+
+    <h2>Annotate Image</h2>
+    <button onclick="loadNextImage()">Load Next Image</button><br><br>
+
+    <canvas id="canvas"></canvas>
+
+    <br><button onclick="saveAnnotatedImage()">Save Annotation</button>
+
+    <script>
+        let canvas = document.getElementById("canvas");
+        let ctx = canvas.getContext("2d");
+        let currentImage = "";
+        const numBlocksX = 24 * 2;
+        const numBlocksY = 15 * 2;
+        let blockWidth, blockHeight;
+    
+        let colorGrid;
+    
+        document.getElementById("uploadForm").onsubmit = async (e) => {
+            e.preventDefault();
+            let formData = new FormData(e.target);
+    
+            try {
+                let response = await fetch("/upload", {
+                    method: "POST",
+                    body: formData
+                });
+    
+                if (!response.ok) {
+                    throw new Error('Failed to upload files');
+                }
+    
+                let result = await response.json();
+                //alert(result.message);
+            } catch (error) {
+                alert("Error: " + error.message);
+            }
+        };
+    
+        async function loadNextImage() {
+            colorGrid = Array(numBlocksX * numBlocksY).fill('#000000');
+    
+            let response = await fetch("/get_next_image");
+            let data = await response.json();
+            if (!data.image) {
+                alert("No more images!");
+                return;
+            }
+    
+            let img = new Image();
+            img.src = "/unannotated_images/" + data.image;
+            currentImage = data.image;
+    
+            img.onload = () => {
+                const screenHeightPercentage = 0.8;
+                const screenHeight = window.innerHeight;
+                const canvasHeight = screenHeight * screenHeightPercentage;
+    
+                const aspectRatio = img.width / img.height;
+                const canvasWidth = canvasHeight * aspectRatio;
+    
+                canvas.width = canvasWidth;
+                canvas.height = canvasHeight;
+    
+                blockWidth = canvas.width / numBlocksX;
+                blockHeight = canvas.height / numBlocksY;
+    
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, canvas.width, canvas.height);
+                drawGrid();
+            };
+        }
+    
+        function drawGrid() {
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 2;
+            for (let i = 0; i <= numBlocksX; i++) {
+                ctx.moveTo(i * blockWidth, 0);
+                ctx.lineTo(i * blockWidth, canvas.height);
+            }
+            for (let i = 0; i <= numBlocksY; i++) {
+                ctx.moveTo(0, i * blockHeight);
+                ctx.lineTo(canvas.width, i * blockHeight);
+            }
+            ctx.stroke();
+        }
+    
+        canvas.addEventListener("click", (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+    
+            const blockX = Math.floor(x / blockWidth);
+            const blockY = Math.floor(y / blockHeight);
+    
+            const index = blockY * numBlocksX + blockX;
+    
+            if (colorGrid[index] === '#000000') {
+                const randomColor = getRandomHexColor();
+                colorGrid[index] = randomColor;
+                fillBlock(blockX, blockY, randomColor);
+            }
+        });
+    
+        function fillBlock(blockX, blockY, color) {
+            const startX = blockX * blockWidth;
+            const startY = blockY * blockHeight;
+            ctx.fillStyle = color;
+            ctx.fillRect(startX, startY, blockWidth, blockHeight);
+        }
+    
+        function getRandomHexColor() {
+            const r = Math.floor(Math.random() * 256);
+            const g = Math.floor(Math.random() * 256);
+            const b = Math.floor(Math.random() * 256);
+            return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+        }
+    
+        async function saveAnnotatedImage() {
+            const annotationText = JSON.stringify(colorGrid);
+    
+            let formData = new FormData();
+            formData.append("annotations", annotationText);
+            formData.append("filename", currentImage);
+    
+            try {
+                let response = await fetch("/save_annotation", {
+                    method: "POST",
+                    body: formData
+                });
+    
+                if (!response.ok) {
+                    throw new Error('Failed to save annotation');
+                }
+    
+                let result = await response.text();
+                //alert(result);
+            } catch (error) {
+                alert("Error: " + error.message);
+            }
+        }
+    
+        window.onload = loadNextImage;
+    
+    </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+*images
+./images
+__pycache
+*images_old
+*model.pt
+*__pycache__
