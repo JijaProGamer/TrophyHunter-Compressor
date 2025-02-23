@@ -77,7 +77,7 @@ image_dataset = FlatFolderDataset(root_dir="./images", transform=transform, raw_
 train_loader = DataLoader(image_dataset, batch_size=args["batch_size"], shuffle=True)
 
 model = VAE(args, 0).to(args["device"])
-
+model.eval()
 
 checkpoint_path = "model.pt"
 def load_model():

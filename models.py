@@ -42,12 +42,11 @@ class Encoder(nn.Module):
         x = self.simplify_1(x)
         #x = self.simplify_2(x)
 
-
-        x = self.flatten(x)
     
         return x
     def forward(self, x):
         x = self.forward_conv(x)
+        x = self.flatten(x)
 
         mu = self.fc_mean(x)
         logvar = self.fc_var(x)
@@ -55,6 +54,7 @@ class Encoder(nn.Module):
         return mu, logvar
     def forward_mu(self, x):
         x = self.forward_conv(x)
+        x = self.flatten(x)
 
         mu = self.fc_mean(x)
 
@@ -127,7 +127,7 @@ class VAE(nn.Module):
 
     def reparameterize(self, mean, logvar):
         std = torch.exp(0.5 * logvar)
-        std = torch.clamp(std, min=0, max=100)
+        #std = torch.clamp(std, min=0, max=100)
 
         eps = torch.randn_like(std)
 

@@ -5,94 +5,179 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TrophyHunter Block Mapper</title>
     <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            position: relative;
+            padding: 20px;
+            flex-wrap: wrap;
+            height: 100vh;
+        }
+
+        .main-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 20px;
+            max-width: 100%;
+            width: 80%;
+        }
+
         canvas {
-            border: 1px solid black;
+        }
+
+        #classList {
+            width: 250px;
+            padding: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border: 1px solid #ccc;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            justify-content: flex-start;
+            flex-shrink: 0;
+        }
+
+        .class-item {
+            padding: 10px;
+            margin: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+
+        .class-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
         }
     </style>
 </head>
 <body>
-    <h1>TrophyHunter Block Mapper</h1>
+    <div class="page">
+        <div>
+            <h1>TrophyHunter Block Mapper</h1>
 
-    <h2>Upload Images</h2>
-    <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="files" multiple accept="image/*"><br><br>
-        <button type="submit">Upload</button>
-    </form>
+            <h2>Upload Images</h2>
+            <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+                <input type="file" name="files" multiple accept="image/*"><br><br>
+                <button type="submit">Upload</button>
+            </form>
 
-    <h2>Annotate Image</h2>
-    <button onclick="loadNextImage()">Load Next Image</button><br><br>
+            <h2>Annotate Image</h2>
+            <button onclick="loadNextImage()">Load Next Image</button><br><br>
 
-    <canvas id="canvas"></canvas>
+            <div class="main-container">
+                <canvas id="canvas"></canvas>
 
-    <br><button onclick="saveAnnotatedImage()">Save Annotation</button>
+                <div id="classList">
+                    <h3>Classes</h3>
+                    <div class="class-item" onclick="setSelectedClass(0)">
+                        <div class="class-color" style="background-color: white;"></div> None (0)
+                    </div>
+                    <div class="class-item" onclick="setSelectedClass(1)">
+                        <div class="class-color" style="background-color: #FF5733;"></div> Outside (1)
+                    </div>
+                    <div class="class-item" onclick="setSelectedClass(2)">
+                        <div class="class-color" style="background-color: #888888;"></div> Wall (2)
+                    </div>
+                    <div class="class-item" onclick="setSelectedClass(3)">
+                        <div class="class-color" style="background-color: #00BFFF;"></div> Water (3)
+                    </div>
+                    <div class="class-item" onclick="setSelectedClass(4)">
+                        <div class="class-color" style="background-color: #0d5e0d;"></div> Zone (4)
+                    </div>
+                    <div class="class-item" onclick="setSelectedClass(5)">
+                        <div class="class-color" style="background-color: #00ff00;"></div> Grass (5)
+                    </div>
+                </div>
+            </div>
+
+            <br><button onclick="saveAnnotatedImage()">Save Annotation</button>
+        </div>
+    </div>
 
     <script>
         let canvas = document.getElementById("canvas");
         let ctx = canvas.getContext("2d");
         let currentImage = "";
-        const numBlocksX = 24 * 2;
-        const numBlocksY = 15 * 2;
+        let currentImgObj = null;  // Store the image object
+        const numBlocksX = 72;
+        const numBlocksY = 45;
         let blockWidth, blockHeight;
-    
         let colorGrid;
-    
+        let selectedClass = 1;
+        let isDragging = false;
+        let startX, startY;
+
+        const classColors = {
+            0: "rgba(255, 255, 255, 0)",
+            1: "#FF5733",
+            2: "#888888",
+            3: "#00BFFF",
+            4: "#0d5e0d",
+            5: "#00FF00"
+        };
+
         document.getElementById("uploadForm").onsubmit = async (e) => {
             e.preventDefault();
             let formData = new FormData(e.target);
-    
+
             try {
                 let response = await fetch("/upload", {
                     method: "POST",
                     body: formData
                 });
-    
+
                 if (!response.ok) {
                     throw new Error('Failed to upload files');
                 }
-    
+
                 let result = await response.json();
-                //alert(result.message);
             } catch (error) {
                 alert("Error: " + error.message);
             }
         };
-    
+
         async function loadNextImage() {
-            colorGrid = Array(numBlocksX * numBlocksY).fill('#000000');
-    
+            colorGrid = Array(numBlocksX * numBlocksY).fill(0);
+
             let response = await fetch("/get_next_image");
             let data = await response.json();
             if (!data.image) {
                 alert("No more images!");
                 return;
             }
-    
+
             let img = new Image();
             img.src = "/unannotated_images/" + data.image;
             currentImage = data.image;
-    
+
             img.onload = () => {
+                currentImgObj = img;  // Store the image object for later reference
+
                 const screenHeightPercentage = 0.8;
                 const screenHeight = window.innerHeight;
                 const canvasHeight = screenHeight * screenHeightPercentage;
-    
+
                 const aspectRatio = img.width / img.height;
                 const canvasWidth = canvasHeight * aspectRatio;
-    
+
                 canvas.width = canvasWidth;
                 canvas.height = canvasHeight;
-    
+
                 blockWidth = canvas.width / numBlocksX;
                 blockHeight = canvas.height / numBlocksY;
-    
+
                 ctx.imageSmoothingEnabled = false;
                 ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, canvas.width, canvas.height);
                 drawGrid();
             };
         }
-    
+
         function drawGrid() {
-            ctx.strokeStyle = "white";
+            /*ctx.strokeStyle = "rgba(255, 255, 255, 50)";
             ctx.lineWidth = 2;
             for (let i = 0; i <= numBlocksX; i++) {
                 ctx.moveTo(i * blockWidth, 0);
@@ -102,66 +187,107 @@
                 ctx.moveTo(0, i * blockHeight);
                 ctx.lineTo(canvas.width, i * blockHeight);
             }
-            ctx.stroke();
+            ctx.stroke();*/
         }
-    
-        canvas.addEventListener("click", (event) => {
-            const rect = canvas.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
-    
-            const blockX = Math.floor(x / blockWidth);
-            const blockY = Math.floor(y / blockHeight);
-    
-            const index = blockY * numBlocksX + blockX;
-    
-            if (colorGrid[index] === '#000000') {
-                const randomColor = getRandomHexColor();
-                colorGrid[index] = randomColor;
-                fillBlock(blockX, blockY, randomColor);
+
+        canvas.addEventListener("mousedown", (event) => {
+            if (event.button === 2) {  // Right-click (drag)
+                isDragging = true;
+                startX = event.clientX - canvas.getBoundingClientRect().left;
+                startY = event.clientY - canvas.getBoundingClientRect().top;
+            } else if (event.button === 0) {  // Left-click (single block)
+                const x = event.clientX - canvas.getBoundingClientRect().left;
+                const y = event.clientY - canvas.getBoundingClientRect().top;
+                const blockX = Math.floor(x / blockWidth);
+                const blockY = Math.floor(y / blockHeight);
+                const index = blockY * numBlocksX + blockX;
+                colorGrid[index] = selectedClass;
+                fillBlock(blockX, blockY, classColors[selectedClass]);
             }
         });
-    
+
+        canvas.addEventListener("mousemove", (event) => {
+            if (isDragging) {
+                const currentX = event.clientX - canvas.getBoundingClientRect().left;
+                const currentY = event.clientY - canvas.getBoundingClientRect().top;
+
+                drawGrid();
+
+                const left = Math.min(startX, currentX);
+                const top = Math.min(startY, currentY);
+                const right = Math.max(startX, currentX);
+                const bottom = Math.max(startY, currentY);
+
+                const startBlockX = Math.floor(left / blockWidth);
+                const startBlockY = Math.floor(top / blockHeight);
+                const endBlockX = Math.floor(right / blockWidth);
+                const endBlockY = Math.floor(bottom / blockHeight);
+
+                for (let row = startBlockY; row <= endBlockY; row++) {
+                    for (let col = startBlockX; col <= endBlockX; col++) {
+                        const index = row * numBlocksX + col;
+                        if (colorGrid[index] !== selectedClass) {
+                            colorGrid[index] = selectedClass;
+                            fillBlock(col, row, classColors[selectedClass]);
+                        }
+                    }
+                }
+            }
+        });
+
+        canvas.addEventListener("mouseup", () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener("contextmenu", (event) => {
+            event.preventDefault();  // Prevent the default context menu from showing
+        });
+
         function fillBlock(blockX, blockY, color) {
             const startX = blockX * blockWidth;
             const startY = blockY * blockHeight;
+
             ctx.fillStyle = color;
+            ctx.clearRect(startX, startY, blockWidth, blockHeight);
             ctx.fillRect(startX, startY, blockWidth, blockHeight);
         }
-    
-        function getRandomHexColor() {
-            const r = Math.floor(Math.random() * 256);
-            const g = Math.floor(Math.random() * 256);
-            const b = Math.floor(Math.random() * 256);
-            return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+
+        function setSelectedClass(classId) {
+            selectedClass = classId;
         }
-    
+
         async function saveAnnotatedImage() {
-            const annotationText = JSON.stringify(colorGrid);
-    
+            let annotationText = '';
+            for (let i = 0; i < numBlocksY; i++) {
+                let row = colorGrid.slice(i * numBlocksX, (i + 1) * numBlocksX);
+                annotationText += row.join(" ");
+                if (i < numBlocksY - 1) {
+                    annotationText += "\n";
+                }
+            }
+
             let formData = new FormData();
             formData.append("annotations", annotationText);
             formData.append("filename", currentImage);
-    
+
             try {
                 let response = await fetch("/save_annotation", {
                     method: "POST",
                     body: formData
                 });
-    
+
                 if (!response.ok) {
                     throw new Error('Failed to save annotation');
                 }
-    
+
                 let result = await response.text();
-                //alert(result);
+                loadNextImage();
             } catch (error) {
                 alert("Error: " + error.message);
             }
         }
-    
+
         window.onload = loadNextImage;
-    
     </script>
 </body>
 </html>

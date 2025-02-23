@@ -1,8 +1,6 @@
 from flask import Flask, send_from_directory, request, jsonify
 import os
-import base64
 import shutil
-import json
 
 app = Flask(__name__)
 
@@ -53,12 +51,13 @@ def save_annotation():
     if not filename or not annotation_text:
         return "Missing data", 400
 
-    color_grid = json.loads(annotation_text)
-    
-    annotation_file_path = os.path.join(ANNOTATED_TEXT_FOLDER, filename.rsplit(".", 1)[0] + ".json")
-    
-    with open(annotation_file_path, "w") as txt_file:
-        json.dump(color_grid, txt_file)
+    annotation_file_path = os.path.join(ANNOTATED_TEXT_FOLDER, filename.rsplit(".", 1)[0] + ".txt")
+    with open(annotation_file_path, "w") as json_file:
+        json_file.write(annotation_text)
+
+    original_image_path = os.path.join(UPLOAD_FOLDER, filename)
+    if os.path.exists(original_image_path):
+        shutil.move(original_image_path, os.path.join(ANNOTATED_IMAGES_FOLDER, filename))
 
     return "Annotation saved!"
 
@@ -67,4 +66,4 @@ def serve_unannotated_image(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=False)

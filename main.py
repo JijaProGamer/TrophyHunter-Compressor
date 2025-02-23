@@ -17,7 +17,7 @@ from models import VAE
 args = {
     "device": torch.device("cuda"),
 
-    "beta": 1,
+    "beta": 0.1,#10,
     "disentangle": True,
 
     "gradient_clip": 2,

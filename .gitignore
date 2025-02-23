@@ -3,4 +3,5 @@
 __pycache
 *images_old
 *model.pt
+*model*.pt
 *__pycache__
