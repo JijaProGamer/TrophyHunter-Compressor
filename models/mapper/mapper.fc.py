@@ -18,6 +18,7 @@ args = {
     "disentangle": True,
     "resolution": [224, 400],
     "latent_size": 2048,
+    "loader_batch_size": 64,
 
     "test_image_folder": "./test_images/",
     "image_folder": "./annotated_images/images/",
@@ -25,7 +26,7 @@ args = {
     "small_map_size": (24, 15),
     "map_size": (72, 45),
     "num_blocks": 6,
-    "batch_size": 32,
+    "batch_size": 64,
 
     "lr": 5e-4,
 
@@ -88,7 +89,7 @@ class AnnotatedImageDataset(Dataset):
                 annotation = np.loadtxt(f, dtype=np.int32).reshape(-1)
 
             with torch.no_grad():
-                latent_vector = self.vae_model.zforward(img, disable_disentanglement=True).cpu()
+                latent_vector = self.vae_model.zforward(img).cpu()
 
             self.latent_vectors.append(latent_vector)
             self.annotations.append(torch.tensor(annotation, dtype=torch.int8))
@@ -107,14 +108,30 @@ class MapperModel(nn.Module):
         self.small_map_size = small_map_size
         self.num_classes = num_classes
         
-        self.fc1 = nn.Linear(latent_size, np.prod(small_map_size))
-        self.fc2 = nn.Linear(np.prod(small_map_size), np.prod(map_size) * num_classes)
+        self.fc1 = nn.Linear(latent_size, np.prod(small_map_size), bias=False)
+        self.bn1 = nn.BatchNorm1d(np.prod(small_map_size))
+
+        self.fc2 = nn.Linear(np.prod(small_map_size), np.prod(small_map_size), bias=False)
+        self.bn2 = nn.BatchNorm1d(np.prod(small_map_size))
+
+
+        self.fc3 = nn.Linear(np.prod(small_map_size), np.prod(map_size) * num_classes)
+       # self.fc3 = nn.Linear(np.prod(small_map_size), np.prod(map_size))
+
+        #self.conv1 = nn.Conv2d(1, self.num_classes, kernel_size=3, padding=1)
                 
     def forward(self, x):
-        x = F.gelu(self.fc1(x))
-        x = self.fc2(x)
+        x = F.relu(self.bn1(self.fc1(x)))
+        x = F.relu(self.bn2(self.fc2(x)))
+        #x = F.gelu(self.bn1(self.fc1(x)))
+        #x = F.gelu(self.bn2(self.fc2(x)))
+        x = self.fc3(x)
         
         x = x.view(-1, self.num_classes, self.map_size[1], self.map_size[0])
+        #x = x.view(-1, 1, self.map_size[1], self.map_size[0])
+
+        #x = self.conv1(x)
+
         return x
     
 class Mapper:
@@ -135,7 +152,7 @@ class Mapper:
 
     def predict(self, latent_vector):
         with torch.no_grad():
-            predicted_annotation = self.mapper_model(latent_vector.squeeze(0))
+            predicted_annotation = self.mapper_model(latent_vector)
             predicted_annotation = torch.argmax(predicted_annotation, dim=1).cpu().numpy()
 
         return predicted_annotation
@@ -180,12 +197,26 @@ class Mapper:
 
         
         return 0,outputs"""
-    def train_step(self, latent_vectors, annotations):
+    def train_step(self, latent_vectors, annotations, l1_lambda=1e-5):
         self.optimizer.zero_grad()
 
         outputs = self.mapper_model(latent_vectors)
         annotations = annotations.reshape([outputs.shape[0], outputs.shape[2], outputs.shape[3]]).long()
         loss = self.criterion(outputs, annotations)
+
+        #l1_penalty = 0
+
+        #for name, param in self.mapper_model.named_parameters():
+        #    if "fc" in name and "weight" in name:
+        #        l1_penalty += param.norm(1, dim=1).sum()
+
+        #for name, param in self.mapper_model.named_parameters():
+        #    if "fc" in name and "weight" in name:
+        #        abs_weights = param.abs()
+        #        max_weight_per_neuron = abs_weights.max(dim=1, keepdim=True)[0]
+        #        l1_penalty += (abs_weights - max_weight_per_neuron).sum()
+
+        #loss += l1_lambda * l1_penalty
 
         loss.backward()
         self.optimizer.step()
@@ -208,9 +239,9 @@ mapper = Mapper(
 )
 
 dataset = AnnotatedImageDataset(args["image_folder"], args["annotation_folder"], VAEmodel, args["device"])
-dataloader = DataLoader(dataset, batch_size=args["batch_size"], shuffle=True)
+dataloader = DataLoader(dataset, batch_size=args["loader_batch_size"], shuffle=True)
 
-num_epochs = 100
+num_epochs = 130
 for epoch in range(num_epochs):
     mapper.mapper_model.train()
     running_loss = 0.0
@@ -241,27 +272,44 @@ mapper.mapper_model.eval()
 
 
 
-image_index = 3
+image_index = 4
 
-#latent_vector, annotation = dataset[image_index]
-#latent_vector = latent_vector.to(args["device"])
 
-test_image_files = sorted([f for f in os.listdir(args["test_image_folder"]) if f.endswith(('.png', '.jpg', '.jpeg'))])
-test_image_path = os.path.join(args["test_image_folder"], test_image_files[image_index])
-test_image = Image.open(test_image_path).convert("RGB")
-test_image = np.array(test_image).astype(np.float32) / 127.5 - 1
-test_image = torch.tensor(test_image).permute(2, 0, 1).unsqueeze(0).to(args["device"])
 
-with torch.no_grad():
-    latent_vector = VAEmodel.zforward(test_image, disable_disentanglement=True).to(args["device"])
+test_image = True
+real_annotations = False
 
-#annotations = annotation.cpu().numpy().reshape(args["map_size"][1], args["map_size"][0])
-annotations = mapper.predict(latent_vector)
-annotations = annotations[0,...]
+if test_image:
+    test_image_files = sorted([f for f in os.listdir(args["test_image_folder"]) if f.endswith(('.png', '.jpg', '.jpeg'))])
+    test_image_path = os.path.join(args["test_image_folder"], test_image_files[image_index])
+    image = Image.open(test_image_path).convert("RGB")
 
-image_path = os.path.join(args["image_folder"], dataset.image_files[image_index])
-image = Image.open(image_path).convert("RGB")
-image = np.array(image).astype(np.float32) / 127.5 - 1 
-image = torch.tensor(image).permute(2, 0, 1).unsqueeze(0).to(args["device"])
+    image = np.array(image)
+    image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1)
+    image = image / 127.5 - 1
+    image = image.unsqueeze(0).to(args["device"])
+
+    with torch.no_grad():
+        latent_vector = VAEmodel.zforward(image).to(args["device"])
+    
+    annotations = mapper.predict(latent_vector)
+    annotations = annotations[0,...]
+else:
+    latent_vector, annotation = dataset[image_index]
+    latent_vector = latent_vector.to(args["device"])
+
+    image_path = os.path.join(args["image_folder"], dataset.image_files[image_index])
+    image = Image.open(image_path).convert("RGB")
+
+    image = np.array(image)
+    image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1)
+    image = image / 127.5 - 1
+    image = image.unsqueeze(0).to(args["device"])
+
+    if real_annotations:
+        annotations = annotation.cpu().numpy().reshape(args["map_size"][1], args["map_size"][0])
+    else:
+        annotations = mapper.predict(latent_vector)
+        annotations = annotations[0,...]
 
 mapper.display_test(image, annotations)

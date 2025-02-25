@@ -13,17 +13,18 @@ class Encoder(nn.Module):
 
         x_downscale = int(input_resolution[0] / 16)
         y_downscale = int(input_resolution[1] / 16)
-        out_dims = 32 * x_downscale * y_downscale
+        out_dims = 16 * x_downscale * y_downscale
         
-        self.conv = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1, bias=False) 
+        self.conv = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False) 
         self.bn = nn.BatchNorm2d(64)
         
         self.res1 = ResNetLayer(in_channels=64, out_channels=128, scale='down', num_layers=1)
         self.res2 = ResNetLayer(in_channels=128, out_channels=256, scale='down', num_layers=2)
         self.res3 = ResNetLayer(in_channels=256, out_channels=512, scale='down', num_layers=3)
+        self.res4 = ResNetLayer(in_channels=512, out_channels=1024, scale='down', num_layers=4)
 
-        self.simplify_1 = DownscaleFilters(in_channels=512, out_channels=256)
-        self.simplify_2 = DownscaleFilters(in_channels=256, out_channels=32)
+        self.simplify_1 = DownscaleFilters(in_channels=1024, out_channels=16)
+        #self.simplify_2 = DownscaleFilters(in_channels=256, out_channels=32)
         
         self.flatten = nn.Flatten()
 
@@ -31,21 +32,21 @@ class Encoder(nn.Module):
         self.fc_var = nn.Linear(out_dims, latent_dims)
 
     def forward_conv(self, x):
-        x = F.silu(self.bn(self.conv(x)))
+        x = F.gelu(self.bn(self.conv(x)))
 
         x = self.res1(x)
         x = self.res2(x)
         x = self.res3(x)
+        x = self.res4(x)
 
         x = self.simplify_1(x)
-        x = self.simplify_2(x)
+        #x = self.simplify_2(x)
 
-
-        x = self.flatten(x)
     
         return x
     def forward(self, x):
         x = self.forward_conv(x)
+        x = self.flatten(x)
 
         mu = self.fc_mean(x)
         logvar = self.fc_var(x)
@@ -53,6 +54,7 @@ class Encoder(nn.Module):
         return mu, logvar
     def forward_mu(self, x):
         x = self.forward_conv(x)
+        x = self.flatten(x)
 
         mu = self.fc_mean(x)
 
@@ -69,29 +71,31 @@ class Decoder(nn.Module):
         self.x_downscale = x_downscale
         self.y_downscale = y_downscale
 
-        self.transformer = nn.Linear(latent_dims, x_downscale * y_downscale * 32, bias=False)
-        self.transformer_bn = nn.BatchNorm1d(x_downscale * y_downscale * 32)
+        self.transformer = nn.Linear(latent_dims, x_downscale * y_downscale * 16, bias=False)
+        self.transformer_bn = nn.BatchNorm1d(x_downscale * y_downscale * 16)
 
-        self.simplify_1 = DownscaleFilters(in_channels=32, out_channels=256)
-        self.simplify_2 = DownscaleFilters(in_channels=256, out_channels=512)
+        #self.simplify_1 = DownscaleFilters(in_channels=32, out_channels=256)
+        self.simplify_2 = DownscaleFilters(in_channels=16, out_channels=1024)
 
-        self.res1 = ResNetLayer(in_channels=512, out_channels=256, scale='up', num_layers=3)
-        self.res2 = ResNetLayer(in_channels=256, out_channels=128, scale='up', num_layers=2)
-        self.res3 = ResNetLayer(in_channels=128, out_channels=64, scale='up', num_layers=1)
+        self.res1 = ResNetLayer(in_channels=1024, out_channels=512, scale='up', num_layers=4)
+        self.res2 = ResNetLayer(in_channels=512, out_channels=256, scale='up', num_layers=3)
+        self.res3 = ResNetLayer(in_channels=256, out_channels=128, scale='up', num_layers=2)
+        self.res4 = ResNetLayer(in_channels=128, out_channels=64, scale='up', num_layers=1)
 
-        self.output = nn.ConvTranspose2d(64, 3, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.output = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
 
     def forward(self, x):
 
-        x = F.silu(self.transformer_bn(self.transformer(x)))
-        x = x.view(-1, 32, self.x_downscale, self.y_downscale)
+        x = F.gelu(self.transformer_bn(self.transformer(x)))
+        x = x.view(-1, 16, self.x_downscale, self.y_downscale)
 
-        x = self.simplify_1(x)
+        #x = self.simplify_1(x)
         x = self.simplify_2(x)
 
         x = self.res1(x)
         x = self.res2(x)
         x = self.res3(x)
+        x = self.res4(x)
 
         x = self.output(x)
         
@@ -104,7 +108,7 @@ class VAE(nn.Module):
         self.args = args
         self.dataset_size = dataset_size
 
-        self.ssim_module = SSIM(data_range=1, size_average=True, channel=3, win_size=15, win_sigma=1.5)
+        self.ssim_module = SSIM(data_range=1, size_average=True, channel=3, win_size=11, win_sigma=0.1)
        
         self.encoder = Encoder(
             input_resolution=args["resolution"],
@@ -123,7 +127,7 @@ class VAE(nn.Module):
 
     def reparameterize(self, mean, logvar):
         std = torch.exp(0.5 * logvar)
-        std = torch.clamp(std, min=0, max=100)
+        #std = torch.clamp(std, min=0, max=100)
 
         eps = torch.randn_like(std)
 
@@ -141,8 +145,7 @@ class VAE(nn.Module):
         #lpips = self.lpips(x, y).mean()
         l1 =    F.l1_loss(x, y)
         ssim = 1 - self.ssim_module((x + 1) / 2, (y + 1) / 2)
-        #combo = l1 * 0.3333 + lpips * 0.333 + ssim * 0.3333333
-        #combo = lpips * 0.05 + ssim * 0.8 + l1 * 0.15
+        #combo = lpips * 0.1 + ssim * 0.8 + l1 * 0.1
         combo = ssim * 0.9 + l1 * 0.1
 
         return combo * (self.args["resolution"][0] * self.args["resolution"][1] * 3)
@@ -186,6 +189,6 @@ class VAE(nn.Module):
             z = self.reparameterize(mu, logvar)
             return mu, logvar, z
         else:
-            mu, logvar = self.encoder.forward_mu(x)
+            mu = self.encoder.forward_mu(x)
 
-            return mu, torch.zeros_like(mu), mu
+            return mu

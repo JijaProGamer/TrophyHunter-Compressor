@@ -19,14 +19,14 @@ class ResNetLayer(nn.Module):
         self.conv_first = nn.Sequential(
             conv_first_layer,
             nn.BatchNorm2d(out_channels),
-            nn.SiLU()
+            nn.GELU()
         )
 
         layers = []
         for i in range(1, num_layers):
             layers.append(nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False))
             layers.append(nn.BatchNorm2d(out_channels))
-            layers.append(nn.SiLU())
+            layers.append(nn.GELU())
 
         self.conv_stack = nn.Sequential(*layers)
 
@@ -52,7 +52,7 @@ class ResNetLayer(nn.Module):
 
         out = self.conv_stack(out)
         out += identity
-        out = F.silu(out)
+        out = F.gelu(out)
 
         return out
 
@@ -67,7 +67,7 @@ class DownscaleFilters(nn.Module):
     def forward(self, x):
         out = self.conv(x)
         out = self.bn(out)
-        out = F.silu(out)
+        out = F.gelu(out)
         
         return out
 
@@ -94,10 +94,10 @@ class DenseResNetLayer(nn.Module):
         
         out = self.linear1(x)
         out = self.bn1(out)
-        out = F.silu(out)
+        out = F.gelu(out)
 
         out += identity
-        out = F.silu(out)
+        out = F.gelu(out)
         
         return out
 

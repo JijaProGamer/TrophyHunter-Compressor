@@ -75,6 +75,7 @@ class AnnotatedImageDataset(Dataset):
         self._process_data()
 
     def _process_data(self):
+        #i = 0
         for img_file, ann_file in tqdm(zip(self.image_files, self.annotation_files), total=len(self.image_files)):
             img_path = os.path.join(self.image_folder, img_file)
             img = Image.open(img_path).convert("RGB")
@@ -82,6 +83,10 @@ class AnnotatedImageDataset(Dataset):
             img = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1)
             img = img / 127.5 - 1
             img = img.unsqueeze(0).to(args["device"])
+
+            #i += 1
+            #if i > 3:
+            #    break
 
             ann_path = os.path.join(self.annotation_folder, ann_file)
             with open(ann_path, "r") as f:
@@ -100,6 +105,54 @@ class AnnotatedImageDataset(Dataset):
     def __getitem__(self, idx):
         return self.latent_vectors[idx], self.annotations[idx]
     
+"""class MapperModel(nn.Module):
+    def __init__(self, latent_size, small_map_size, map_size, num_classes):
+        super(MapperModel, self).__init__()
+        self.latent_size = latent_size
+        self.map_size = map_size
+        self.small_map_size = small_map_size
+        self.num_classes = num_classes
+
+
+        self.begin1 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.bn_b1 = nn.BatchNorm2d(32)
+        self.begin2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.bn_b2 = nn.BatchNorm2d(64)
+        
+        self.up = nn.ConvTranspose2d(64, 128, kernel_size=3, stride=3, padding=0)
+        self.bn_up = nn.BatchNorm2d(128)
+
+        self.conv1 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(64)
+
+        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(32)
+
+        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(16)
+
+        self.conv4 = nn.Conv2d(16, 16, kernel_size=3, padding=1)
+        self.bn4 = nn.BatchNorm2d(16)
+
+        self.out = nn.Conv2d(16, self.num_classes, kernel_size=3, padding=1)
+                
+    def forward(self, x):
+        x = F.gelu(self.bn_b1(self.begin1(x)))
+        x = F.gelu(self.bn_b2(self.begin2(x)))
+
+        x = F.gelu(self.bn_up(self.up(x)))
+        x = F.pad(x, (0, 0, 2, 1))
+        x = x[:, :, :, :-3]
+
+        x = F.gelu(self.bn1(self.conv1(x)))
+        x = F.gelu(self.bn2(self.conv2(x)))
+        x = F.gelu(self.bn3(self.conv3(x)))
+        x = F.gelu(self.bn4(self.conv4(x)))
+
+        x = self.out(x)
+
+        return x"""
+
 class MapperModel(nn.Module):
     def __init__(self, latent_size, small_map_size, map_size, num_classes):
         super(MapperModel, self).__init__()
@@ -107,23 +160,44 @@ class MapperModel(nn.Module):
         self.map_size = map_size
         self.small_map_size = small_map_size
         self.num_classes = num_classes
-        
-        self.fc1 = nn.Linear(latent_size, np.prod(small_map_size))
 
-        self.conv1 = nn.ConvTranspose2d(1, self.num_classes, kernel_size=4, stride=3, padding=1, output_padding=1)
-        self.conv2 = nn.Conv2d(self.num_classes, self.num_classes, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(self.num_classes, self.num_classes, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(self.num_classes, self.num_classes, kernel_size=3, padding=1)
+
+        self.begin1 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.bn_b1 = nn.BatchNorm2d(32)
+        self.begin2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.bn_b2 = nn.BatchNorm2d(64)
+        
+        self.up = nn.ConvTranspose2d(64, 128, kernel_size=3, stride=3, padding=0)
+        self.bn_up = nn.BatchNorm2d(128)
+
+        self.conv1 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(64)
+
+        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(32)
+
+        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(16)
+
+        self.conv4 = nn.Conv2d(16, 16, kernel_size=3, padding=1)
+        self.bn4 = nn.BatchNorm2d(16)
+
+        self.out = nn.Conv2d(16, self.num_classes, kernel_size=3, padding=1)
                 
     def forward(self, x):
-        x = F.gelu(self.fc1(x))
+        x = F.gelu(self.bn_b1(self.begin1(x)))
+        x = F.gelu(self.bn_b2(self.begin2(x)))
 
-        x = x.view(-1, 1, self.small_map_size[1], self.small_map_size[0])
-        
-        x = F.gelu(self.conv1(x))
-        x = F.gelu(self.conv2(x))
-        x = F.gelu(self.conv3(x))
-        x = self.conv3(x)
+        x = F.gelu(self.bn_up(self.up(x)))
+        x = F.pad(x, (0, 0, 2, 1))
+        x = x[:, :, :, :-3]
+
+        x = F.gelu(self.bn1(self.conv1(x)))
+        x = F.gelu(self.bn2(self.conv2(x)))
+        x = F.gelu(self.bn3(self.conv3(x)))
+        x = F.gelu(self.bn4(self.conv4(x)))
+
+        x = self.out(x)
 
         return x
     
@@ -141,7 +215,7 @@ class Mapper:
         self.optimizer = torch.optim.Adam(self.mapper_model.parameters(), lr=lr)
         self.criterion = nn.CrossEntropyLoss()
 
-        summary(self.mapper_model, (latent_size, ), device="cuda")
+        summary(self.mapper_model, (16, args["resolution"][0], args["resolution"][1]), device="cuda")
 
     def predict(self, latent_vector):
         with torch.no_grad():
@@ -220,7 +294,7 @@ mapper = Mapper(
 dataset = AnnotatedImageDataset(args["image_folder"], args["annotation_folder"], VAEmodel, args["device"])
 dataloader = DataLoader(dataset, batch_size=args["batch_size"], shuffle=True)
 
-num_epochs = 500
+num_epochs = 200
 for epoch in range(num_epochs):
     mapper.mapper_model.train()
     running_loss = 0.0
@@ -251,26 +325,44 @@ mapper.mapper_model.eval()
 
 
 
-image_index = 3
+image_index = 4
 
-#latent_vector, annotation = dataset[image_index]
 
-test_image_files = sorted([f for f in os.listdir(args["test_image_folder"]) if f.endswith(('.png', '.jpg', '.jpeg'))])
-test_image_path = os.path.join(args["test_image_folder"], test_image_files[image_index])
-test_image = Image.open(test_image_path).convert("RGB")
-test_image = np.array(test_image).astype(np.float32) / 127.5 - 1
-test_image = torch.tensor(test_image).permute(2, 0, 1).unsqueeze(0).to(args["device"])
 
-with torch.no_grad():
-    latent_vector = VAEmodel.zforward(test_image, disable_disentanglement=True).cpu()
+test_image = True
+real_annotations = False
 
-#annotations = annotation.cpu().numpy().reshape(args["map_size"][1], args["map_size"][0])
-annotations = mapper.predict(latent_vector.to(args["device"]))
-annotations = annotations[0,...]
+if test_image:
+    test_image_files = sorted([f for f in os.listdir(args["test_image_folder"]) if f.endswith(('.png', '.jpg', '.jpeg'))])
+    test_image_path = os.path.join(args["test_image_folder"], test_image_files[image_index])
+    image = Image.open(test_image_path).convert("RGB")
 
-image_path = os.path.join(args["image_folder"], dataset.image_files[image_index])
-image = Image.open(image_path).convert("RGB")
-image = np.array(image).astype(np.float32) / 127.5 - 1 
-image = torch.tensor(image).permute(2, 0, 1).unsqueeze(0).to(args["device"])
+    image = np.array(image)
+    image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1)
+    image = image / 127.5 - 1
+    image = image.unsqueeze(0).to(args["device"])
+
+    with torch.no_grad():
+        latent_vector = VAEmodel.encoder.forward_conv(image).to(args["device"]).unsqueeze(0)
+    
+    annotations = mapper.predict(latent_vector)
+    annotations = annotations[0,...]
+else:
+    latent_vector, annotation = dataset[image_index]
+    latent_vector = latent_vector.to(args["device"]).unsqueeze(0)
+
+    image_path = os.path.join(args["image_folder"], dataset.image_files[image_index])
+    image = Image.open(image_path).convert("RGB")
+
+    image = np.array(image)
+    image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1)
+    image = image / 127.5 - 1
+    image = image.unsqueeze(0).to(args["device"])
+
+    if real_annotations:
+        annotations = annotation.cpu().numpy().reshape(args["map_size"][1], args["map_size"][0])
+    else:
+        annotations = mapper.predict(latent_vector)
+        annotations = annotations[0,...]
 
 mapper.display_test(image, annotations)

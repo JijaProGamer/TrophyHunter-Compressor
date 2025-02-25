@@ -9,16 +9,13 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from PIL import Image
 from pathlib import Path
-#import lpips
+import lpips
 import torchvision.utils as vutils
 
 from models import VAE
 
 args = {
     "device": torch.device("cuda"),
-
-    "beta": 0.1,#10,
-    "disentangle": True,
 
     "gradient_clip": 2,
     "l1_lambda": 5e-7,
@@ -220,13 +217,12 @@ if __name__ == '__main__':
 
 
     checkpoint_path = "model.pt"
-    def save_checkpoint(train_step, epoch):
+    def save_checkpoint(epoch):
         checkpoint = {
             'model_state_dict': {k: v for k, v in model.state_dict().items() if not k.startswith("lpips.")},
             'optimizer_state_dict': optimizer.state_dict(),
             #'scheduler_state_dict': scheduler.state_dict(),
-            'epoch': epoch,
-            'train_step': train_step,
+            'epoch': epoch
         }
         torch.save(checkpoint, checkpoint_path)
 
@@ -238,32 +234,29 @@ if __name__ == '__main__':
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             #scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             epoch = checkpoint['epoch']
-            train_step = checkpoint['train_step']
             
-            return epoch, train_step
+            return epoch
 
-        return 0, 0
+        return 0
 
     total_updates = 10
 
     def train(epochs=5):
-        start_epoch, train_step = load_checkpoint()
+        start_epoch = load_checkpoint()
 
-        #model.lpips = lpips.LPIPS(net='alex', spatial=True).to(args["device"])
-        #train_step = 0
+        model.lpips = lpips.LPIPS(net='alex', spatial=True).to(args["device"])
 
         #test()
         
         for epoch in range(start_epoch, epochs):
             model.train()
             running_loss = 0.0
+            running_scale = 0.0
             last_update = 0
 
             progress_bar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch")
 
             for batch_idx, (images, _) in enumerate(progress_bar):
-                train_step += 1
-
                 progress = batch_idx / len(train_loader)
                 if progress >= last_update / total_updates:
                     last_update += 1
@@ -278,9 +271,9 @@ if __name__ == '__main__':
                     continue
 
                 images = images.to(args["device"])
-                mu, logvar, z, decoded = model(images)
+                z, decoded = model(images)
 
-                loss = model.loss(train_step, images, decoded, z, mu, logvar)
+                loss = model.loss(images, decoded, z)
 
                 if torch.isnan(loss):
                     print("NaN encountered in loss, skipping batch.")
@@ -298,12 +291,14 @@ if __name__ == '__main__':
                 #scheduler.step(epoch + batch_idx / len(train_loader))
 
                 running_loss += loss.item()
+                running_scale += z.abs().mean().item()
 
             #scheduler.step()
             
-            save_checkpoint(train_step, epoch)
+            save_checkpoint(epoch)
             #test()
-            print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader):.4f}")
+
+            print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader):.4f}, Scale: {running_scale / len(train_loader)}")
 
     load_checkpoint()
     #random_sample()
