@@ -24,6 +24,14 @@ args = {
     "disentangle": True
 }
 
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.benchmark_limit = 0
+torch.backends.cudnn.allow_tf32 = True
+
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
+
 class FlatFolderDataset(torch.utils.data.Dataset):
     def __init__(self, root_dir, transform=None, raw_shape=(128, 128, 3)):
         self.image_paths = list(Path(root_dir).rglob("*.*"))
@@ -103,7 +111,7 @@ def load_dataset():
                 continue
 
             images = images.to(args["device"])
-            mu = model.zforward(images, disable_disentanglement=True)
+            mu = model.zforward(images)#, disable_disentanglement=True)
             images_data.append(mu)
 
 load_dataset()

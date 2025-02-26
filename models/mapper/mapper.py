@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import os
 import matplotlib.pyplot as plt
+import optuna
 from torchsummary import summary
 from tqdm import tqdm
 
@@ -22,10 +23,11 @@ args = {
     "test_image_folder": "./test_images/",
     "image_folder": "./annotated_images/images/",
     "annotation_folder": "./annotated_images/annotations/",
-    "small_map_size": (24, 15),
+    "validation_image_folder": "./validation_images/images/",
+    "validation_annotation_folder": "./validation_images/annotations/",
     "map_size": (72, 45),
     "num_blocks": 6,
-    "batch_size": 32,
+    "batch_size": 16,#32,
 
     "lr": 5e-4,
 
@@ -105,117 +107,67 @@ class AnnotatedImageDataset(Dataset):
     def __getitem__(self, idx):
         return self.latent_vectors[idx], self.annotations[idx]
     
-"""class MapperModel(nn.Module):
-    def __init__(self, latent_size, small_map_size, map_size, num_classes):
-        super(MapperModel, self).__init__()
-        self.latent_size = latent_size
-        self.map_size = map_size
-        self.small_map_size = small_map_size
-        self.num_classes = num_classes
-
-
-        self.begin1 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.bn_b1 = nn.BatchNorm2d(32)
-        self.begin2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.bn_b2 = nn.BatchNorm2d(64)
-        
-        self.up = nn.ConvTranspose2d(64, 128, kernel_size=3, stride=3, padding=0)
-        self.bn_up = nn.BatchNorm2d(128)
-
-        self.conv1 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(64)
-
-        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(32)
-
-        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm2d(16)
-
-        self.conv4 = nn.Conv2d(16, 16, kernel_size=3, padding=1)
-        self.bn4 = nn.BatchNorm2d(16)
-
-        self.out = nn.Conv2d(16, self.num_classes, kernel_size=3, padding=1)
-                
-    def forward(self, x):
-        x = F.gelu(self.bn_b1(self.begin1(x)))
-        x = F.gelu(self.bn_b2(self.begin2(x)))
-
-        x = F.gelu(self.bn_up(self.up(x)))
-        x = F.pad(x, (0, 0, 2, 1))
-        x = x[:, :, :, :-3]
-
-        x = F.gelu(self.bn1(self.conv1(x)))
-        x = F.gelu(self.bn2(self.conv2(x)))
-        x = F.gelu(self.bn3(self.conv3(x)))
-        x = F.gelu(self.bn4(self.conv4(x)))
-
-        x = self.out(x)
-
-        return x"""
-
 class MapperModel(nn.Module):
-    def __init__(self, latent_size, small_map_size, map_size, num_classes):
+    def __init__(self, num_classes, begin_filters, mid_filters, final_filters):
         super(MapperModel, self).__init__()
-        self.latent_size = latent_size
-        self.map_size = map_size
-        self.small_map_size = small_map_size
         self.num_classes = num_classes
 
+        begin_layers = []
 
-        self.begin1 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.bn_b1 = nn.BatchNorm2d(32)
-        self.begin2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.bn_b2 = nn.BatchNorm2d(64)
-        
-        self.up = nn.ConvTranspose2d(64, 128, kernel_size=3, stride=3, padding=0)
-        self.bn_up = nn.BatchNorm2d(128)
+        last_filters = 16
+        for idx, filters in enumerate(begin_filters):
+            padding = 1
+            if idx == 0:
+                padding = 2
+            
+            begin_layers.append(nn.Conv2d(last_filters, filters, kernel_size=3, padding=padding))
+            begin_layers.append(nn.BatchNorm2d(filters))
+            begin_layers.append(nn.GELU())
+            last_filters = filters
 
-        self.conv1 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(64)
+        self.begin = nn.Sequential(*begin_layers)
 
-        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(32)
+        self.up = nn.ConvTranspose2d(begin_filters[-1], mid_filters, kernel_size=3, stride=3, padding=1)
+        self.bn_up = nn.BatchNorm2d(mid_filters)
 
-        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm2d(16)
 
-        self.conv4 = nn.Conv2d(16, 16, kernel_size=3, padding=1)
-        self.bn4 = nn.BatchNorm2d(16)
+        out_layers = []
 
-        self.out = nn.Conv2d(16, self.num_classes, kernel_size=3, padding=1)
+        last_filters = mid_filters
+        for filters in final_filters:
+            out_layers.append(nn.Conv2d(last_filters, filters, kernel_size=3, padding=1))
+            out_layers.append(nn.BatchNorm2d(filters))
+            out_layers.append(nn.GELU())
+            last_filters = filters
+
+        self.end = nn.Sequential(*out_layers)
+
+        self.out = nn.Conv2d(final_filters[-1], self.num_classes, kernel_size=3, padding=1)
                 
     def forward(self, x):
-        x = F.gelu(self.bn_b1(self.begin1(x)))
-        x = F.gelu(self.bn_b2(self.begin2(x)))
+        x = self.begin(x)
 
         x = F.gelu(self.bn_up(self.up(x)))
-        x = F.pad(x, (0, 0, 2, 1))
-        x = x[:, :, :, :-3]
+        x = x[:, :, :-1, :-7]
 
-        x = F.gelu(self.bn1(self.conv1(x)))
-        x = F.gelu(self.bn2(self.conv2(x)))
-        x = F.gelu(self.bn3(self.conv3(x)))
-        x = F.gelu(self.bn4(self.conv4(x)))
+        x = self.end(x)
 
         x = self.out(x)
 
         return x
-    
+
 class Mapper:
-    def __init__(self, image_folder, annotation_folder, small_map_size, map_size, vae_model, latent_size, num_classes, lr=5e-4, test_image_folder=None):
+    def __init__(self, image_folder, annotation_folder, num_classes, vae_model, device, test_image_folder=None):
         self.image_folder = image_folder
+        self.num_classes = num_classes
         self.annotation_folder = annotation_folder
         self.test_image_folder = test_image_folder
         self.vae_model = vae_model
-        self.latent_size = latent_size
-        self.num_classes = num_classes
-        
-        self.mapper_model = MapperModel(latent_size=latent_size, small_map_size=small_map_size, map_size=map_size, num_classes=num_classes).to(args["device"])
-        
-        self.optimizer = torch.optim.Adam(self.mapper_model.parameters(), lr=lr)
+        self.device = device
+
         self.criterion = nn.CrossEntropyLoss()
 
-        summary(self.mapper_model, (16, args["resolution"][0], args["resolution"][1]), device="cuda")
+        #summary(self.mapper_model, (16, int(args["resolution"][0]/16), int(args["resolution"][1]/16)), device="cuda")
 
     def predict(self, latent_vector):
         with torch.no_grad():
@@ -253,48 +205,98 @@ class Mapper:
         hex_color = classColors.get(class_id, "#FFFFFF")
         return np.array([int(hex_color[i:i+2], 16) for i in (1, 3, 5)], dtype=np.uint8)
 
-    """def train_step(self, latent_vectors, annotations):        
-        self.optimizer.zero_grad()
-        
-        outputs = self.mapper_model(latent_vectors)
-        outputs = torch.argmax(outputs, dim=1)
-
-        annotations = annotations.reshape(outputs.shape)
-
-
-        
-        return 0,outputs"""
-    def train_step(self, latent_vectors, annotations):
+    def make_model(self, lr, begin_filters, mid_filters, final_filters):
+        self.mapper_model = MapperModel(begin_filters=begin_filters, mid_filters=mid_filters, final_filters=final_filters, num_classes=self.num_classes).to(self.device)
+        self.optimizer = torch.optim.Adam(self.mapper_model.parameters(), lr=lr)
+        #summary(self.mapper_model, (16, int(args["resolution"][0]/16), int(args["resolution"][1]/16)), device="cuda")
+    
+    def train_step(self, latent_vectors, annotations, l1_lambda=1e-5):
         self.optimizer.zero_grad()
 
         outputs = self.mapper_model(latent_vectors)
         annotations = annotations.reshape([outputs.shape[0], outputs.shape[2], outputs.shape[3]]).long()
         loss = self.criterion(outputs, annotations)
 
+        #l1_loss = sum(torch.norm(param, p=1) for param in self.mapper_model.parameters()) # L1
+        #l1_loss = sum(torch.norm(param, p=2) for param in self.mapper_model.parameters())  # L2 
+        #loss += l1_loss * l1_lambda
+
         loss.backward()
         self.optimizer.step()
 
         return loss, outputs
+    def train(self, epochs, dataloader, validation_dataloader):
+        for epoch in range(epochs):
+            self.mapper_model.train()
 
+            running_loss = 0.0
+            correct_preds = 0
+            total_preds = 0
 
+            for latent_vectors, annotations in dataloader: 
+                latent_vectors = latent_vectors.squeeze(1).to(args["device"])
+                annotations = annotations.to(args["device"])
 
+                loss, outputs = mapper.train_step(latent_vectors, annotations)
+
+                running_loss += loss
+
+                _, predicted = torch.max(outputs, 1)
+                predicted = predicted.view(-1)
+                annotations = annotations.view(-1) 
+
+                correct_preds += (predicted == annotations).sum().item()
+                total_preds += annotations.numel()
+
+        #epoch_loss = running_loss / len(dataloader)
+        epoch_accuracy = 100 * correct_preds / total_preds
+
+        return epoch_accuracy
 
 mapper = Mapper(
     image_folder=args["image_folder"], 
     annotation_folder=args["annotation_folder"], 
     test_image_folder=args["test_image_folder"], 
-    small_map_size=args["small_map_size"],
-    map_size=args["map_size"], 
+    num_classes=args["num_blocks"],
     vae_model=VAEmodel, 
-    latent_size=args["latent_size"], 
-    num_classes=args["num_blocks"], 
-    lr=args["lr"]
+    device=args["device"], 
 )
 
 dataset = AnnotatedImageDataset(args["image_folder"], args["annotation_folder"], VAEmodel, args["device"])
 dataloader = DataLoader(dataset, batch_size=args["batch_size"], shuffle=True)
 
-num_epochs = 200
+validation_dataset = AnnotatedImageDataset(args["validation_image_folder"], args["validation_annotation_folder"], VAEmodel, args["device"])
+validation_dataloader = DataLoader(validation_dataset, batch_size=args["batch_size"])
+
+def powers_of_two_within_range(min_value, max_value):
+    return [2**i for i in range(0, 8) if 2**i >= min_value and 2**i <= max_value]
+
+def objective(trial):
+    middle_filters = 2 ** trial.suggest_int('middle_filters', 4, 7)
+
+    powers_of_two_before = [x for x in powers_of_two_within_range(8, 128)]
+    powers_of_two_after = [x for x in powers_of_two_within_range(8, 128)]
+    
+    num_layers_before = trial.suggest_int('num_layers_before', 1, 5)
+    num_layers_after = trial.suggest_int('num_layers_after', 1, 5)
+
+    filters_before = [powers_of_two_before[trial.suggest_int(f'filters_before_{i}', 0, len(powers_of_two_before)-1)] for i in range(num_layers_before)]
+    filters_after = [powers_of_two_after[trial.suggest_int(f'filters_after_{i}', 0, len(powers_of_two_after)-1)] for i in range(num_layers_after)]
+
+    lr = trial.suggest_float("lr", 1e-5, 1e-3)
+    epochs = trial.suggest_int("epochs", 20, 400)
+
+
+    mapper.make_model(lr=lr, begin_filters=filters_before, mid_filters=middle_filters, final_filters=filters_after)
+    accuracy = mapper.train(epochs, dataloader, validation_dataloader)
+    
+ 
+    return accuracy
+
+study = optuna.create_study(direction="maximize") 
+study.optimize(objective, n_trials=100)
+
+"""num_epochs = 150
 for epoch in range(num_epochs):
     mapper.mapper_model.train()
     running_loss = 0.0
@@ -325,7 +327,7 @@ mapper.mapper_model.eval()
 
 
 
-image_index = 4
+image_index = 1
 
 
 
@@ -365,4 +367,4 @@ else:
         annotations = mapper.predict(latent_vector)
         annotations = annotations[0,...]
 
-mapper.display_test(image, annotations)
+mapper.display_test(image, annotations)"""

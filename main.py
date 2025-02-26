@@ -167,13 +167,14 @@ if __name__ == '__main__':
     def random_sample(save_path="random_samples.png"):
         model.eval()
         z = torch.randn((args["test_amount"], args["latent_size"])).to(args["device"])
-        
+        #z *= 8
+
         with torch.no_grad():
             images = model.decoder(z)
             
         grid = vutils.make_grid(images, nrow=args["test_amount"], padding=2, normalize=True)
         
-        plt.figure(figsize=(args["test_amount"] * 2, 2))
+        plt.figure(figsize=(grid.size(2) / 100, grid.size(1) / 100), dpi=100)
         plt.imshow(grid.permute(1, 2, 0).cpu().numpy())
         plt.axis('off')
 
