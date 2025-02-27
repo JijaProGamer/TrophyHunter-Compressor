@@ -39,20 +39,37 @@ args = {
 class FlatFolderDataset(torch.utils.data.Dataset):
     def __init__(self, root_dir, transform=None, raw_shape=(128, 128, 3)):
         self.image_paths = list(Path(root_dir).rglob("*.*"))
+        self.len = len(self.image_paths)
         self.transform = transform
         self.raw_shape = raw_shape
 
     def __len__(self):
-        return len(self.image_paths)
+        return self.len
 
     def _load_raw_image(self, image_path):
         with open(image_path, "rb") as f:
             raw_data = np.frombuffer(f.read(), dtype=np.uint8)
         image = raw_data.reshape(self.raw_shape)
         return image
-
     def __getitem__(self, idx):
-        max_attempts = len(self.image_paths)
+        image_path = self.image_paths[idx]
+
+        if image_path.suffix.lower() == ".raw":
+            image = self._load_raw_image(image_path)
+        else:
+            image = Image.open(image_path).convert("RGB")
+            image = np.array(image)
+
+        image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1)
+        image = image / 127.5 - 1
+
+        #if self.transform:
+        #    image = self.transform(image)
+        
+        return image, 0
+
+    """def __getitem__(self, idx):
+        max_attempts = self.len
 
         for _ in range(max_attempts):
             image_path = self.image_paths[idx]
@@ -62,7 +79,9 @@ class FlatFolderDataset(torch.utils.data.Dataset):
                     image = self._load_raw_image(image_path)
                 else:
                     image = Image.open(image_path).convert("RGB")
+                    print(image.shape)
                     image = np.array(image)
+                    print(image.shape)
 
                 image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1)
                 image = image / 127.5 - 1
@@ -77,7 +96,7 @@ class FlatFolderDataset(torch.utils.data.Dataset):
                 del self.image_paths[idx]
                 idx = idx % len(self.image_paths) if self.image_paths else 0
         
-        raise RuntimeError("All images in dataset are corrupted!")
+        raise RuntimeError("All images in dataset are corrupted!")"""
 
 
 #def init_weights(m):
@@ -94,8 +113,10 @@ image_dataset = FlatFolderDataset(root_dir="./images", raw_shape=(244, 400, 3))
 
 train_dataset, test_dataset = torch.utils.data.random_split(image_dataset, [len(image_dataset) - args["test_amount"], args["test_amount"]])
 
-train_loader = DataLoader(train_dataset, batch_size=args["batch_size"], shuffle=True, pin_memory=True, num_workers=4)
-test_loader = DataLoader(test_dataset, batch_size=args["batch_size"], shuffle=False, pin_memory=True)
+#train_loader = DataLoader(train_dataset, batch_size=args["batch_size"], shuffle=True, pin_memory=True, num_workers=4)
+#test_loader = DataLoader(test_dataset, batch_size=args["batch_size"], shuffle=False, pin_memory=True)
+train_loader = DataLoader(train_dataset, batch_size=args["batch_size"])
+test_loader = DataLoader(test_dataset, batch_size=args["batch_size"])
 
 if __name__ == '__main__':
     model = VAE(args, len(train_dataset)).to(args["device"])
@@ -302,7 +323,5 @@ if __name__ == '__main__':
             print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader):.4f}, Scale: {running_scale / len(train_loader)}")
 
     load_checkpoint()
-    #random_sample()
-    #latent_traversal()
     test()
     train(epochs=1000)

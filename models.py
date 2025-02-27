@@ -56,6 +56,12 @@ class Encoder(nn.Module):
         x = self.simplify_1(x)
     
         return x
+    def continue_conv(self, x):
+        x = self.flatten(x)
+
+        mu = self.fc(x)
+
+        return mu
     def forward(self, x):
         x = self.forward_conv(x)
         x = self.flatten(x)

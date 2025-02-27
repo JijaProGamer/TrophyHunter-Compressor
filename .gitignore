@@ -5,3 +5,5 @@ __pycache
 *model.pt
 *model*.pt
 *__pycache__
+*model.pth
+*model*.pth
