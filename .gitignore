@@ -7,3 +7,4 @@ __pycache
 *__pycache__
 *model.pth
 *model*.pth
+*dataset*

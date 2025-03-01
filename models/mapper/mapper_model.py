@@ -50,10 +50,14 @@ class AnnotatedImageDataset(Dataset):
         self.device = device
         self.vae_model = vae_model
 
-        self.image_files = sorted([f for f in os.listdir(image_folder) if f.endswith(('.png', '.jpg', '.jpeg'))])
-        self.annotation_files = sorted([f for f in os.listdir(annotation_folder) if f.endswith('.txt')])
+        # Get all annotation filenames (without extensions)
+        annotation_filenames = {f.rsplit('.', 1)[0] for f in os.listdir(annotation_folder) if f.endswith('.txt')}
 
-        assert len(self.image_files) == len(self.annotation_files), "Mismatch between images and annotations"
+        # Filter image files to only those with matching annotation
+        self.image_files = sorted([f for f in os.listdir(image_folder) 
+                                   if f.rsplit('.', 1)[0] in annotation_filenames and f.endswith(('.png', '.jpg', '.jpeg'))])
+
+        self.annotation_files = sorted([f + '.txt' for f in annotation_filenames if f + '.txt' in os.listdir(annotation_folder)])
 
         self.latent_vectors = []
         self.annotations = []
@@ -61,7 +65,6 @@ class AnnotatedImageDataset(Dataset):
         self._process_data()
 
     def _process_data(self):
-        #i = 0
         for img_file, ann_file in tqdm(zip(self.image_files, self.annotation_files), total=len(self.image_files)):
             img_path = os.path.join(self.image_folder, img_file)
             img = Image.open(img_path).convert("RGB")
@@ -70,16 +73,11 @@ class AnnotatedImageDataset(Dataset):
             img = img / 127.5 - 1
             img = img.unsqueeze(0).to(args["device"])
 
-            #i += 1
-            #if i > 3:
-            #    break
-
             ann_path = os.path.join(self.annotation_folder, ann_file)
             with open(ann_path, "r") as f:
                 annotation = np.loadtxt(f, dtype=np.int32).reshape(-1)
 
             with torch.no_grad():
-                #latent_vector = self.vae_model.zforward(img, disable_disentanglement=True).cpu()
                 latent_vector = self.vae_model.encoder.forward_conv(img).cpu()
 
             self.latent_vectors.append(latent_vector)
@@ -90,6 +88,7 @@ class AnnotatedImageDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.latent_vectors[idx], self.annotations[idx]
+
     
 class MapperModel(nn.Module):
     def __init__(self, num_classes, begin_filters, mid_filters, final_filters):
@@ -119,7 +118,8 @@ class MapperModel(nn.Module):
 
         last_filters = mid_filters
         for filters in final_filters:
-            out_layers.append(nn.Conv2d(last_filters, filters, kernel_size=3, padding=1))
+            #out_layers.append(nn.Conv2d(last_filters, filters, kernel_size=3, padding=1))
+            out_layers.append(nn.Conv2d(last_filters, filters, kernel_size=1, padding=0))
             out_layers.append(nn.BatchNorm2d(filters))
             out_layers.append(nn.GELU())
             last_filters = filters
@@ -217,6 +217,9 @@ class Mapper:
             total_preds = 0
 
             for latent_vectors, annotations in dataloader: 
+                latent_vectors += torch.randn_like(latent_vectors) * 0.1 
+
+
                 latent_vectors = latent_vectors.squeeze(1).to(args["device"])
                 annotations = annotations.to(args["device"])
 
