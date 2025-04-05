@@ -21,7 +21,7 @@ args = {
     "validation_annotation_folder": "./validation_images/annotations/",
     "map_size": (72, 45),
     "num_blocks": 6,
-    "batch_size": 16,
+    "batch_size": 64,
 
     "lr": 5e-4,
 }
@@ -75,13 +75,17 @@ class AnnotatedImageDataset(Dataset):
 
             ann_path = os.path.join(self.annotation_folder, ann_file)
             with open(ann_path, "r") as f:
-                annotation = np.loadtxt(f, dtype=np.int32).reshape(-1)
+                raw_annotation = [line.strip() for line in f.readlines() if line.strip()]
+                raw_annotation_data = [list(map(int, line.split())) for line in raw_annotation]
+                annotation = torch.tensor(raw_annotation_data, dtype=torch.int8)
+
+                #annotation = np.loadtxt(f, dtype=np.int32).reshape(-1)
 
             with torch.no_grad():
                 latent_vector = self.vae_model.encoder.forward_conv(img).cpu()
 
             self.latent_vectors.append(latent_vector)
-            self.annotations.append(torch.tensor(annotation, dtype=torch.int8))
+            self.annotations.append(annotation)
 
     def __len__(self):
         return len(self.latent_vectors)
@@ -95,49 +99,53 @@ class MapperModel(nn.Module):
         super(MapperModel, self).__init__()
         self.num_classes = num_classes
 
+        self.initial_conv = nn.Conv2d(16, begin_filters[0], kernel_size=3, padding=2)
+        self.initial_bn = nn.BatchNorm2d(begin_filters[0])
+        
         begin_layers = []
+        last_filters = begin_filters[0]
 
-        last_filters = 16
-        for idx, filters in enumerate(begin_filters):
-            padding = 1
-            if idx == 0:
-                padding = 2
-            
-            begin_layers.append(nn.Conv2d(last_filters, filters, kernel_size=3, padding=padding))
+        for filters in begin_filters[1:]:
+            begin_layers.append(nn.Conv2d(last_filters, filters, kernel_size=3, padding=1))
             begin_layers.append(nn.BatchNorm2d(filters))
             begin_layers.append(nn.GELU())
             last_filters = filters
 
         self.begin = nn.Sequential(*begin_layers)
 
+        self.residual1 = nn.Conv2d(begin_filters[0], begin_filters[-1], kernel_size=1, padding=0)
+
         self.up = nn.ConvTranspose2d(begin_filters[-1], mid_filters, kernel_size=3, stride=3, padding=1)
         self.bn_up = nn.BatchNorm2d(mid_filters)
 
+        self.residual2 = nn.Conv2d(mid_filters, final_filters[-1], kernel_size=1, padding=0)
 
         out_layers = []
-
         last_filters = mid_filters
+
         for filters in final_filters:
-            #out_layers.append(nn.Conv2d(last_filters, filters, kernel_size=3, padding=1))
-            out_layers.append(nn.Conv2d(last_filters, filters, kernel_size=1, padding=0))
+            out_layers.append(nn.Conv2d(last_filters, filters, kernel_size=3, padding=1))
             out_layers.append(nn.BatchNorm2d(filters))
             out_layers.append(nn.GELU())
             last_filters = filters
 
         self.end = nn.Sequential(*out_layers)
-
         self.out = nn.Conv2d(final_filters[-1], self.num_classes, kernel_size=3, padding=1)
-                
+
     def forward(self, x):
+        x = F.gelu(self.initial_bn(self.initial_conv(x)))
+        residual = self.residual1(x)
         x = self.begin(x)
+        x += residual
 
         x = F.gelu(self.bn_up(self.up(x)))
         x = x[:, :, :-1, :-7]
 
+        residual = self.residual2(x)
         x = self.end(x)
+        x += residual
 
         x = self.out(x)
-
         return x
 
 class Mapper:
@@ -217,7 +225,7 @@ class Mapper:
             total_preds = 0
 
             for latent_vectors, annotations in dataloader: 
-                latent_vectors += torch.randn_like(latent_vectors) * 0.1 
+                #latent_vectors += torch.randn_like(latent_vectors) * 0.1 
 
 
                 latent_vectors = latent_vectors.squeeze(1).to(args["device"])

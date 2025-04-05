@@ -38,10 +38,40 @@ def upload():
 @app.route("/get_next_image", methods=["GET"])
 def get_next_image():
     images = [f for f in os.listdir(UPLOAD_FOLDER) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
-    if not images:
-        return jsonify({"image": None})
+    
+    if images:
+        return jsonify({"image": images[0]})
 
-    return jsonify({"image": images[0]})
+    return jsonify({"image": None})
+
+@app.route("/get_annotated_images", methods=["GET"])
+def get_annotated_images():
+    images = [f for f in os.listdir(ANNOTATED_IMAGES_FOLDER) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+    valid_images = {}
+
+    for image in images:
+        annotation_file_path = os.path.join(ANNOTATED_TEXT_FOLDER, image.rsplit(".", 1)[0] + ".txt")
+
+        if os.path.exists(annotation_file_path):
+            valid_images[len(valid_images)] = image
+        else:
+            shutil.move(os.path.join(ANNOTATED_IMAGES_FOLDER, image), os.path.join(UPLOAD_FOLDER, image))
+
+    return jsonify({"images": valid_images})
+
+
+
+@app.route("/get_annotation/<filename>", methods=["GET"])
+def get_annotation(filename):
+    annotation_file_path = os.path.join(ANNOTATED_TEXT_FOLDER, filename.rsplit(".", 1)[0] + ".txt")
+    
+    if not os.path.exists(annotation_file_path):
+        return jsonify({"annotations": None})
+    
+    with open(annotation_file_path, "r") as file:
+        annotation_text = file.read()
+
+    return jsonify({"annotations": annotation_text})
 
 @app.route("/save_annotation", methods=["POST"])
 def save_annotation():
@@ -65,5 +95,9 @@ def save_annotation():
 def serve_unannotated_image(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
+@app.route("/annotated_images/<filename>")
+def serve_annotated_image(filename):
+    return send_from_directory(ANNOTATED_IMAGES_FOLDER, filename)
+
 if __name__ == "__main__":
-    app.run(debug=False)
+    app.run(debug=True)

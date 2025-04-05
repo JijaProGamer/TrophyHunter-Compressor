@@ -52,11 +52,18 @@ best_accuracy = 0.0
 def objective(trial):
     global best_accuracy
     
-    num_layers = trial.suggest_int('num_layers', 1, 6)
-    filters = [2 ** trial.suggest_int(f'filter_{i}', 3, 8) for i in range(num_layers)]
+    #num_layers = trial.suggest_int('num_layers', 1, 6)
+    #filters = [2 ** trial.suggest_int(f'filter_{i}', 3, 8) for i in range(num_layers)]
 
-    lr = trial.suggest_float("lr", 1e-5, 1e-3)
-    epochs = trial.suggest_int("epochs", 10, 200)
+    #lr = trial.suggest_float("lr", 1e-5, 1e-3)
+    #epochs = trial.suggest_int("epochs", 10, 200)
+
+    #detector.make_model(lr=lr, filters=filters)
+    #accuracy = detector.train(epochs, dataloader, validation_dataloader)
+    lr = 1e-4
+    filters = [32, 64, 128, 64, 32]
+    epochs = 200
+    num_layers = 10
 
     detector.make_model(lr=lr, filters=filters)
     accuracy = detector.train(epochs, dataloader, validation_dataloader)
@@ -79,7 +86,7 @@ def objective(trial):
 
 #study = optuna.create_study(direction="maximize") 
 study = optuna.create_study(direction="minimize") 
-study.optimize(objective, n_trials=100)
+study.optimize(objective, n_trials=1)
 
 
 

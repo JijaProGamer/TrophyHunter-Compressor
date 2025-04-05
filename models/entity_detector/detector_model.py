@@ -84,7 +84,6 @@ class LabeledImageDataset(Dataset):
 
     def __parse_an__(self, label_path, img):
         _, _, H, W = img.shape
-        grid_H, grid_W = self.grid_size
         boxes = []
 
         with open(label_path, 'r') as file:
@@ -96,14 +95,7 @@ class LabeledImageDataset(Dataset):
                 width = float(line_split[3]) * W
                 height = float(line_split[4]) * H
 
-                grid_x = int(x_center / W * grid_W)
-                grid_y = int(y_center / H * grid_H)
-                rel_x = (x_center / W * grid_W) - grid_x
-                rel_y = (y_center / H * grid_H) - grid_y
-                rel_w = width / W
-                rel_h = height / H
-
-                boxes.append([class_id, grid_x, grid_y, rel_x, rel_y, rel_w, rel_h])
+                boxes.append([class_id, x_center, y_center, width, height])
 
         boxes = torch.tensor(boxes)
         return self.pad_annotations(boxes)
@@ -125,10 +117,10 @@ class LabeledImageDataset(Dataset):
         return self.latent_vectors[idx], self.labels[idx]
     
 class DetectorModel(nn.Module):
-    def __init__(self, num_classes, filters):
+    def __init__(self, num_classes, filters, num_anchors):
         super(DetectorModel, self).__init__()
         self.num_classes = num_classes
-        self.num_outputs = 5 + num_classes
+        self.num_outputs = (5 + num_classes) * num_anchors
 
         layers = []
 

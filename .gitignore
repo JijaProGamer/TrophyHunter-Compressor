@@ -8,3 +8,4 @@ __pycache
 *model.pth
 *model*.pth
 *dataset*
+*tests/data*

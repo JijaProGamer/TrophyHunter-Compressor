@@ -9,31 +9,32 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from PIL import Image
 from pathlib import Path
-import lpips
+#import lpips
 import torchvision.utils as vutils
 
 from models import VAE
 
 args = {
-    "device": torch.device("cuda"),
+    "device": "cuda",#torch.device("cuda"),
 
     "gradient_clip": 2,
     "l1_lambda": 5e-7,
     "l2_lambda": 1e-6,
 
-    "batch_size": 32,
-    "lr": 5e-4,
+    "batch_size": 64,
+    #"gradient_steps": 4,
+    "lr": 1e-3,#5e-4,
 
-    #"resolution_raw": [224, 400],
-    #"resolution": [176, 400],
+    "embedding_dim": 4,
+    "num_embeddings": 1024,
+    "use_ema": True,
+    "decay": 0.99,
+    "beta": 0.25,
+    "epsilon": 1e-5,
+
     "resolution": [224, 400],
     
-    "latent_size": 2048,
-
     "test_amount": 32,
-
-    #"is_mss": True,
-    #"steps_anneal": 20000,
 }
 
 class FlatFolderDataset(torch.utils.data.Dataset):
@@ -66,66 +67,22 @@ class FlatFolderDataset(torch.utils.data.Dataset):
         #if self.transform:
         #    image = self.transform(image)
         
-        return image, 0
+        return image
 
-    """def __getitem__(self, idx):
-        max_attempts = self.len
-
-        for _ in range(max_attempts):
-            image_path = self.image_paths[idx]
-
-            try:
-                if image_path.suffix.lower() == ".raw":
-                    image = self._load_raw_image(image_path)
-                else:
-                    image = Image.open(image_path).convert("RGB")
-                    print(image.shape)
-                    image = np.array(image)
-                    print(image.shape)
-
-                image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1)
-                image = image / 127.5 - 1
-
-                #if self.transform:
-                #    image = self.transform(image)
-                
-                return image, 0
-
-            except Exception as e:
-                os.remove(image_path)
-                del self.image_paths[idx]
-                idx = idx % len(self.image_paths) if self.image_paths else 0
-        
-        raise RuntimeError("All images in dataset are corrupted!")"""
-
-
-#def init_weights(m):
-#    if isinstance(m, torch.nn.Linear):
-#        torch.nn.init.xavier_uniform_(m.weight)
-#        m.bias.data.fill_(0.01)
-
-#transform = transforms.Compose([
-#    transforms.Resize((args["resolution"][0], args["resolution"][1])),
-#])
-
-#image_dataset = FlatFolderDataset(root_dir="./images", transform=transform, raw_shape=(224, 400, 3))
 image_dataset = FlatFolderDataset(root_dir="./images", raw_shape=(244, 400, 3))
 
 train_dataset, test_dataset = torch.utils.data.random_split(image_dataset, [len(image_dataset) - args["test_amount"], args["test_amount"]])
 
-#train_loader = DataLoader(train_dataset, batch_size=args["batch_size"], shuffle=True, pin_memory=True, num_workers=4)
-#test_loader = DataLoader(test_dataset, batch_size=args["batch_size"], shuffle=False, pin_memory=True)
-train_loader = DataLoader(train_dataset, batch_size=args["batch_size"])
-test_loader = DataLoader(test_dataset, batch_size=args["batch_size"])
+#train_loader = DataLoader(train_dataset, batch_size=args["batch_size"])
+train_loader = DataLoader(train_dataset, batch_size=args["batch_size"], shuffle=True, pin_memory=True, num_workers=4)
+test_loader = DataLoader(test_dataset, batch_size=args["batch_size"], shuffle=False, pin_memory=True)
+
+#scaler = torch.amp.GradScaler(device="cuda")
 
 if __name__ == '__main__':
-    model = VAE(args, len(train_dataset)).to(args["device"])
-    #model.apply(init_weights)
+    model = VAE(args, len(train_dataset))#.to(args["device"])
 
     optimizer = optim.Adam(model.parameters(), lr=args["lr"])
-
-    #torch.backends.cudnn.deterministic = True
-
 
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.benchmark_limit = 0
@@ -135,24 +92,15 @@ if __name__ == '__main__':
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
     torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
 
-    #def lr_schedule(epoch):
-    #    if epoch == 0:
-    #       return 0.2
-    #    elif epoch >= 1:
-    #        return 1.0
-
-    #scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=T_mult, eta_min=1e-6)
-    #scheduler = LambdaLR(optimizer, lr_lambda=lr_schedule)
-
     def test(save_path="reconstructions.png"):
         model.eval()
 
         test_iter = iter(test_loader)
-        samples, _ = next(test_iter)
+        samples = next(test_iter)
         samples = samples.to(args["device"])
 
         with torch.no_grad():
-            _, reconstructions = model.muforward(samples)
+            _, reconstructions, _, _, _, _ = model(samples)
 
         samples = samples.cpu()
         reconstructions = reconstructions.cpu()
@@ -184,66 +132,11 @@ if __name__ == '__main__':
         plt.close()
 
 
-
-    def random_sample(save_path="random_samples.png"):
-        model.eval()
-        z = torch.randn((args["test_amount"], args["latent_size"])).to(args["device"])
-        #z *= 8
-
-        with torch.no_grad():
-            images = model.decoder(z)
-            
-        grid = vutils.make_grid(images, nrow=args["test_amount"], padding=2, normalize=True)
-        
-        plt.figure(figsize=(grid.size(2) / 100, grid.size(1) / 100), dpi=100)
-        plt.imshow(grid.permute(1, 2, 0).cpu().numpy())
-        plt.axis('off')
-
-        plt.tight_layout(pad=0)
-        plt.savefig(save_path, bbox_inches="tight", pad_inches=0)
-        plt.close()
-
-    def latent_traversal(save_path="latent_traversals.png", max_grid_height=128):
-        model.eval()
-
-        steps = torch.arange(-1.0, 1.1, 0.2)
-        latent_size = args["latent_size"]
-        device = args["device"]
-        
-        all_images = []
-        
-        for i in range(latent_size):
-            if len(all_images) >= max_grid_height:
-                break
-            
-            z = torch.zeros((len(steps), latent_size), device=device)
-            
-            z[:, i] = steps
-
-            with torch.no_grad():
-                images = model.decoder(z)
-            
-            grid = vutils.make_grid(images, nrow=len(steps), padding=2, normalize=True)
-            all_images.append(grid)
-
-        full_grid = torch.cat(all_images, dim=1)
-
-        plt.figure(figsize=(len(steps) * 2, min(latent_size, max_grid_height) * 2))
-        plt.imshow(full_grid.permute(1, 2, 0).cpu().numpy())
-        plt.axis('off')
-
-        plt.tight_layout(pad=0)
-        plt.savefig(save_path, bbox_inches="tight", pad_inches=0)
-        plt.close()
-
-
-
     checkpoint_path = "model.pt"
     def save_checkpoint(epoch):
         checkpoint = {
             'model_state_dict': {k: v for k, v in model.state_dict().items() if not k.startswith("lpips.")},
             'optimizer_state_dict': optimizer.state_dict(),
-            #'scheduler_state_dict': scheduler.state_dict(),
             'epoch': epoch
         }
         torch.save(checkpoint, checkpoint_path)
@@ -254,21 +147,16 @@ if __name__ == '__main__':
             
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            #scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             epoch = checkpoint['epoch']
             
             return epoch
 
         return 0
 
-    total_updates = 10
+    total_updates = 100
 
-    def train(epochs=5):
+    def train(epochs):
         start_epoch = load_checkpoint()
-
-        model.lpips = lpips.LPIPS(net='alex', spatial=True).to(args["device"])
-
-        #test()
         
         for epoch in range(start_epoch, epochs):
             model.train()
@@ -278,7 +166,7 @@ if __name__ == '__main__':
 
             progress_bar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch")
 
-            for batch_idx, (images, _) in enumerate(progress_bar):
+            for batch_idx, images in enumerate(progress_bar):
                 progress = batch_idx / len(train_loader)
                 if progress >= last_update / total_updates:
                     last_update += 1
@@ -293,34 +181,36 @@ if __name__ == '__main__':
                     continue
 
                 images = images.to(args["device"])
-                z, decoded = model(images)
 
-                loss = model.loss(images, decoded, z)
+                #with torch.amp.autocast(device_type="cuda"):
+                _, decoded, _, dictionary_loss, commitment_loss, _ = model(images)
+
+                loss = model.loss(images, decoded, dictionary_loss, commitment_loss)
+
 
                 if torch.isnan(loss):
-                    print("NaN encountered in loss, skipping batch.")
-                    #break
+                    print(" NaN encountered in recon loss, skipping batch.")
                     continue
 
-                optimizer.zero_grad()
+                """scaler.scale(loss).backward()
+
+                if (batch_idx + 1) % args["gradient_steps"] == 0:
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()"""
+                
                 loss.backward()
 
-                #torch.nn.utils.clip_grad_norm_(model.parameters(), args["gradient_clip"])
 
-                optimizer.step()
+                optimizer.step()                
+                optimizer.zero_grad()
 
-
-                #scheduler.step(epoch + batch_idx / len(train_loader))
 
                 running_loss += loss.item()
-                running_scale += z.abs().mean().item()
 
-            #scheduler.step()
-            
             save_checkpoint(epoch)
-            #test()
 
-            print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader):.4f}, Scale: {running_scale / len(train_loader)}")
+            print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader):.4f}")
 
     load_checkpoint()
     test()

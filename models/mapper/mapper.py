@@ -61,18 +61,18 @@ def objective(trial):
     global best_accuracy
 
 
-    middle_filters = 2 ** trial.suggest_int('middle_filters', 5, 8)
+    middle_filters = 2 ** trial.suggest_int('middle_filters', 4, 8)
     
-    num_layers_before = trial.suggest_int('num_layers_before', 2, 5)
-    num_layers_after = trial.suggest_int('num_layers_after', 2, 5)
+    num_layers_before = trial.suggest_int('num_layers_before', 2, 6)
+    num_layers_after = trial.suggest_int('num_layers_after', 2, 6)
 
-    filters_before = [2 ** trial.suggest_int(f'filters_before_{i}', 5, 8) for i in range(num_layers_before)]
-    filters_after = [2 ** trial.suggest_int(f'filters_after_{i}', 5, 8) for i in range(num_layers_after)]
+    filters_before = [2 ** trial.suggest_int(f'filters_before_{i}', 4, 8) for i in range(num_layers_before)]
+    filters_after = [2 ** trial.suggest_int(f'filters_after_{i}', 4, 8) for i in range(num_layers_after)]
 
-    #lr = trial.suggest_float("lr", 1e-5, 1e-4)
-    lr = 5e-4
-    epochs = 350
-    #epochs = trial.suggest_int("epochs", 50, 300)
+    lr = trial.suggest_float("lr", 1e-5, 1e-3)
+    #lr = 5e-4
+    #epochs = 350
+    epochs = trial.suggest_int("epochs", 50, 400)
 
 
 
@@ -89,15 +89,15 @@ def objective(trial):
                 'filters_before': filters_before,
                 'middle_filters': middle_filters,
                 'filters_after': filters_after,
-                #'lr': lr,
-                #'epochs': epochs
+                'lr': lr,
+                'epochs': epochs
             }
         }, "best_mapper_model.pt")
     
     return accuracy
 
-study = optuna.create_study(direction="maximize") 
-study.optimize(objective, n_trials=100)
+"""study = optuna.create_study(direction="maximize") 
+study.optimize(objective, n_trials=1000)
 
 
 
@@ -113,8 +113,8 @@ best_filters_after = [2 ** best_trial.params[f'filters_after_{i}'] for i in rang
 print("best_middle_filters", best_middle_filters)
 print("best_filters_before", best_filters_before)
 print("best_filters_after", best_filters_after)
-#print("lr", best_trial.params["lr"])
-#print("epochs", best_trial.params["epochs"])
+print("lr", best_trial.params["lr"])
+print("epochs", best_trial.params["epochs"])"""
 
 checkpoint = torch.load("best_mapper_model.pt", map_location=args["device"])
 best_arch = checkpoint['architecture']
